@@ -1,3 +1,5 @@
+process.env.VUE_TEMPLATIFY_TEST = true;
+
 const fs = require('fs');
 const path = require('path');
 const expect = require('chai').expect;
