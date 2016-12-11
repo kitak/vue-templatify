@@ -11,34 +11,41 @@ var hotReloadAPIPath = normalize.dep('vue-hot-reload-api')
 
 var cache = Object.create(null);
 
-function generateRenderCode (compiled) {
+function generateRenderFnCode (compiled) {
   return [
     'var render = ' + toFunction(compiled.render) +';',
     'var staticRenderFns = [' + compiled.staticRenderFns.map(toFunction).join(',') + '];', 
-    'var __vue__options__ = {render: render, staticRenderFns: staticRenderFns};',
-    'module.exports = function (options) {',
-    '  options.render = render;',
-    '  options.staticRenderFns = staticRenderFns;',
-    '  return options;',
-    '}\n'
+    'var __vue_options = {render: render, staticRenderFns: staticRenderFns};',
   ].join('\n');
 }
 
-function generateHotReloadCode (id, templateChanged) {
-  'if (module.hot) {(function () {' +
-  '  var hotAPI = require("' + hotReloadAPIPath + '")\n' +
-  '  hotAPI.install(require("vue"), true)\n' +
-  '  if (!hotAPI.compatible) return\n' +
-  '  module.hot.accept()\n' +
-  '  if (!module.hot.data) {\n' +
-  // initial insert
-  '    hotAPI.createRecord("' + id + '", __vue__options__)\n' +
-  '  } else {\n' +
-  (templateChanged
-      ? '    hotAPI.rerender("' + id + '", __vue__options__)\n'
-      : '') +
-  '  }\n' +
-  '})()}';
+function generateWithRenderCode (id, templateChanged, enableHotReload) {
+  var hotReloadCode = [
+    'var hotAPI;',
+    'if (module.hot) {(function () {',
+    '  hotAPI = require("' + hotReloadAPIPath + '");',
+    '  hotAPI.install(require("vue"), true);',
+    '  if (!hotAPI.compatible) return;',
+    '  module.hot.accept();',
+    '  if (module.hot.data) {' +
+    (templateChanged ? '    hotAPI.rerender("' + id + '", __vue_options);' : ''),
+    '  }' +
+    '})()}\n',
+  ].join('\n');
+  return [
+    (enableHotReload ? hotReloadCode : ''),
+    'module.exports = function (options) {',
+    '  options.render = render;',
+    '  options.staticRenderFns = staticRenderFns;',
+    (enableHotReload ? [
+      '  if (!module.hot.data && typeof hotAPI !== "undefined") {' +
+      // initial insert
+      '    hotAPI.createRecord("' + id + '", options);' +
+      '  }\n'
+    ].join('\n') : ''),
+    '  return options;',
+    '}\n',
+  ].join('\n');
 }
 
 module.exports = function vueTemplatify (file, options) {
@@ -71,13 +78,10 @@ module.exports = function vueTemplatify (file, options) {
       });
       throw new Error('Vue template compilation failed');
     } else {
-      output += generateRenderCode(compiled);
-      templateChanged = cache[id] !== output;
+      output += generateRenderFnCode(compiled);
+      templateChanged = (cache[id] && cache[id] !== output);
       cache[id] = output;
-
-      if (!isProduction && !isTest && !isServer) {
-        output += generateHotReloadCode(id, templateChanged);
-      }
+      output += generateWithRenderCode(id, templateChanged, (!isProduction && !isTest && !isServer));
       stream.queue(output);
       stream.queue(null);
     }
